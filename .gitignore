@@ -80,3 +80,7 @@ wheels/
 
 # Configuration files
 config.py
+
+# Output files
+outputs/
+*.csv

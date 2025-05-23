@@ -9,6 +9,8 @@ Usage:
 """
 
 import requests
+import csv
+from io import StringIO
 from config import API_TOKEN, DOMAIN
 
 def get_all_categories():
@@ -16,7 +18,7 @@ def get_all_categories():
     Fetch all categories from the Forumbee API.
     
     Returns:
-        list: List of category dictionaries containing category details
+        list: List of category dictionaries containing name, type, and path
     """
     # Construct the base URL for the API v2 endpoint
     base_url = f"https://{DOMAIN}/api/2"
@@ -30,36 +32,29 @@ def get_all_categories():
         "Content-Type": "application/json"
     }
     
+    # Define the fields we want to retrieve
     params = {
-        "output": "json",  # Ensure response is in JSON format
-        "limit": 1000      # Maximum allowed by API
+        "fields": "name,type,path",
+        "output": "csv"
     }
     
     try:
         response = requests.get(url, headers=headers, params=params)
         print(f"Response status code: {response.status_code}")
         
-        # Print response headers for debugging
-        print("\nResponse headers:")
-        for key, value in response.headers.items():
-            print(f"{key}: {value}")
-        
         response.raise_for_status()
         
-        # Print raw response for debugging
-        print("\nRaw response:")
-        print(response.text)
+        # Parse CSV response
+        csv_data = StringIO(response.text)
+        reader = csv.DictReader(csv_data)
+        categories = list(reader)
         
-        data = response.json()
-        print("\nParsed JSON response:")
-        print(data)
-        
-        categories = data.get("categories", [])
         if not categories:
             print("\nWarning: No categories found in response")
-            print("Available keys in response:", list(data.keys()))
-        
+            return []
+            
         return categories
+        
     except requests.exceptions.HTTPError as http_err:
         print(f"\nHTTP error occurred: {http_err.response.status_code}")
         print(f"Error response: {http_err.response.text}")
@@ -78,6 +73,9 @@ if __name__ == "__main__":
     if categories:
         print("\nFound categories:")
         for category in categories:
-            print(f"Name: {category.get('name')}, Type: {category.get('type')}, Key: {category.get('categoryKey')}")
+            print(f"\nName: {category.get('name', 'N/A')}")
+            print(f"Type: {category.get('type', 'N/A')}")
+            print(f"Path: {category.get('path', 'N/A')}")
+            print("-" * 50)
     else:
         print("\nNo categories were returned.")
