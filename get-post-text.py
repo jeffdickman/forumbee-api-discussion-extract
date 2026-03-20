@@ -1,7 +1,7 @@
 """
 Forumbee API Post Text Extraction Script
 
-This script fetches post content from the Forumbee API and saves it to CSV files.
+This script fetches post content from the Forumbee API and saves it to a single CSV file.
 It uses the API token and domain from config.py.
 
 Usage:
@@ -103,12 +103,11 @@ def get_posts_for_category(category_key):
     while True:
         params = {
             "categoryLink": category_key,
-            "fields": "postKey,title,textPlain,category.name,posted,author.name",
+            "fields": "postKey,parentKey,title,textPlain,category.name,posted,author.name,url",
             "output": "csv",  # Request CSV format
             "limit": limit,
             "offset": offset,
-            "sort": "posted",  # Sort by most recent first
-            "textFormat": "plain-truncate-100"  # Get plain text, truncated to 100 chars
+            "sort": "posted"  # Sort by most recent first
         }
         
         try:
@@ -138,36 +137,70 @@ def get_posts_for_category(category_key):
     print(f"Total posts fetched: {len(all_posts)}")
     return all_posts
 
-def save_posts_to_csv(posts, category_name, output_dir):
+def save_all_posts_to_csv(all_posts, output_dir):
     """
-    Save posts to a CSV file with timestamp.
+    Save all posts to a single CSV file with timestamp.
+    Posts are grouped by parentKey to keep related posts together.
     
     Args:
-        posts (list): List of post dictionaries
-        category_name (str): Name of the category
+        all_posts (list): List of all post dictionaries
         output_dir (str): Directory to save the CSV file
     """
-    if not posts:
+    if not all_posts:
         return
-    
-    # Create a safe filename from the category name
-    safe_category_name = "".join(c for c in category_name if c.isalnum() or c in (' ', '-', '_')).strip()
-    safe_category_name = safe_category_name.replace(' ', '_')
     
     # Create timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     # Create filename
-    filename = f"{timestamp}_{safe_category_name}_posts.csv"
+    filename = f"{timestamp}_all_posts.csv"
     filepath = os.path.join(output_dir, filename)
+    
+    # Define the field order
+    fieldnames = ['parentKey', 'category.name', 'author.name', 'title', 'textPlain', 'posted', 'postKey', 'url']
+    
+    # Process posts to ensure full URLs and group related posts
+    processed_posts = []
+    
+    # Create a dictionary to store posts by their postKey for easy lookup
+    posts_by_key = {post['postKey']: post for post in all_posts}
+    
+    # First, identify all parent posts (posts without a parentKey)
+    parent_posts = [post for post in all_posts if not post.get('parentKey')]
+    
+    # Sort parent posts by posted date (newest first)
+    parent_posts.sort(key=lambda x: x.get('posted', ''), reverse=True)
+    
+    # For each parent post, add it and all its replies
+    for parent in parent_posts:
+        # Add the parent post
+        parent_copy = parent.copy()
+        if parent_copy.get('url') and not parent_copy['url'].startswith('http'):
+            parent_copy['url'] = f"https://{DOMAIN}{parent_copy['url']}"
+        processed_posts.append(parent_copy)
+        
+        # Find all direct replies to this parent
+        replies = [post for post in all_posts if post.get('parentKey') == parent.get('postKey')]
+        
+        # Sort replies by posted date (oldest first)
+        replies.sort(key=lambda x: x.get('posted', ''))
+        
+        # Add each reply
+        for reply in replies:
+            reply_copy = reply.copy()
+            if reply_copy.get('url') and not reply_copy['url'].startswith('http'):
+                reply_copy['url'] = f"https://{DOMAIN}{reply_copy['url']}"
+            processed_posts.append(reply_copy)
     
     # Write to CSV
     with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
-        if posts:
-            writer = csv.DictWriter(csvfile, fieldnames=posts[0].keys())
+        if processed_posts:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(posts)
-            print(f"Saved {len(posts)} posts to {filename}")
+            writer.writerows(processed_posts)
+            print(f"\nSaved {len(processed_posts)} total posts to {filename}")
+            print(f"Number of parent posts: {len(parent_posts)}")
+            print(f"Number of reply posts: {len(processed_posts) - len(parent_posts)}")
 
 if __name__ == "__main__":
     print("Starting category and post fetch...")
@@ -176,6 +209,7 @@ if __name__ == "__main__":
     output_dir = ensure_output_directory()
     
     categories = get_all_categories()
+    all_posts = []
     
     if categories:
         for category in categories:
@@ -191,10 +225,13 @@ if __name__ == "__main__":
             if category_key:
                 posts = get_posts_for_category(category_key)
                 if posts:
-                    save_posts_to_csv(posts, category_name, output_dir)
+                    all_posts.extend(posts)
                 else:
                     print("No posts found in this category")
             else:
                 print("No category key available")
+        
+        # Save all posts to a single CSV file
+        save_all_posts_to_csv(all_posts, output_dir)
     else:
         print("\nNo categories were returned.")
